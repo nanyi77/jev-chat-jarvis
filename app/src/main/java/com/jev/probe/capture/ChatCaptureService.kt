@@ -87,7 +87,9 @@ open class ChatCaptureService : AccessibilityService() {
         prefs = Prefs(this)
         overlay = OverlayController(this)
         overlay?.onManualAnalyze = {
-            currentSnapshot?.let { pendingSnapshot = it; runAnalysis() }
+            val snap = currentSnapshot
+            if (snap == null || snap.messages.isEmpty()) ocrCaptureManual()
+            else { pendingSnapshot = snap; runAnalysis() }
         }
         // Bubble menu: file the open conversation as a knowledge-base contact.
         // Contacts are never created automatically — this is the one-tap way in.
@@ -172,6 +174,11 @@ open class ChatCaptureService : AccessibilityService() {
         // WeChat hides them when the disguise fails) → screenshot + OCR, subject
         // to ScreenCapture's own >=1s throttle and failure backoff.
         if (snapshot.messages.isEmpty()) {
+            // Put the bubble up before the screenshot. A WeChat build that no
+            // longer exposes id/bkl used to return nothing, so the chat looked
+            // completely dead even though the home screen said ready.
+            currentSnapshot = snapshot
+            main.post { overlay?.showIdle(snapshot.title) }
             if (prefs.ocrFallback) {
                 // Gate BEFORE the shot, not after the OCR. Feishu's tree is empty
                 // on every content-changed event, and a successful shot resets the
@@ -386,7 +393,8 @@ open class ChatCaptureService : AccessibilityService() {
         val region = Rect(0, (bmp.height * TOP_CROP).toInt(), bmp.width, (bmp.height * BOTTOM_CROP).toInt())
         ocr.recognize(bmp, region) { lines ->
             runCatching { bmp.recycle() }
-            val msgs = groupOcrLines(lines)
+            val mid = if (pkg == "com.tencent.mm") bmp.width / 2 else null
+            val msgs = groupOcrLines(lines, mid)
             val title = treeTitle?.takeIf { it.isNotBlank() }
                 ?: lines.firstOrNull()?.text?.trim()?.take(24)
             finishOcrSnapshot(ChatSnapshot(title, msgs, note = OCR_NOTE), pkg, manual)
@@ -398,27 +406,37 @@ open class ChatCaptureService : AccessibilityService() {
      * starts a new one. Side is unknowable from a flat screen read, so every
      * group is filed as the other person (and [OCR_NOTE] says so on the panel).
      */
-    private fun groupOcrLines(lines: List<OcrLine>): List<Msg> {
+    /**
+     * @param meOnRightOf when set, a group whose first line sits to the right of
+     *        this x is "me". WeChat only; other whole-screen reads stay "other".
+     */
+    private fun groupOcrLines(lines: List<OcrLine>, meOnRightOf: Int? = null): List<Msg> {
         val usable = lines
             .filter { it.text.isNotBlank() && !PURE_TIME.matches(it.text.trim()) }
             .sortedBy { it.bounds.top }
         val out = ArrayList<Msg>()
         val buf = StringBuilder()
         var prev: OcrLine? = null
+        var groupCenter = 0
+        fun flush() {
+            if (buf.isEmpty()) return
+            val side = if (meOnRightOf != null && groupCenter > meOnRightOf) "me" else "other"
+            out.add(Msg(side, buf.toString()))
+            buf.setLength(0)
+        }
         for (l in usable) {
             val p = prev
             if (p != null) {
                 val gap = l.bounds.top - p.bounds.bottom
                 val lineHeight = maxOf(p.bounds.height(), 1)
-                if (gap > lineHeight * 1.2f) {
-                    if (buf.isNotEmpty()) { out.add(Msg("other", buf.toString())); buf.setLength(0) }
-                }
+                if (gap > lineHeight * 1.2f) flush()
             }
+            if (buf.isEmpty()) groupCenter = l.bounds.centerX()
             if (buf.isNotEmpty()) buf.append(' ')
             buf.append(l.text.trim())
             prev = l
         }
-        if (buf.isNotEmpty()) out.add(Msg("other", buf.toString()))
+        flush()
         return out
     }
 
@@ -460,7 +478,10 @@ open class ChatCaptureService : AccessibilityService() {
         overlay?.resetForNewConversation()
         lastSignature = sig
 
-        val auto = prefs.ocrAutoAnalyze && prefs.autoAnalyze && snapshot.latestFrom == "other"
+        // WeChat's hidden tree is the common case for this fallback, and the
+        // signature above already stops a second shot of the same screen.
+        val wechat = pkg == "com.tencent.mm"
+        val auto = (prefs.ocrAutoAnalyze || wechat) && prefs.autoAnalyze && snapshot.latestFrom == "other"
         if (manual || auto) {
             pendingSnapshot = snapshot
             main.removeCallbacks(debounce)

@@ -145,6 +145,11 @@ class WeChatAdapter : ChatAppAdapter {
         var firstBubbleTop = Int.MAX_VALUE
         var isChat = false
 
+        val height = res.displayMetrics.heightPixels
+        val loose = ArrayList<Triple<Int, Int, String>>() // top, centerX, text
+        var hasComposer = false
+        var sawTabBar = false
+
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
         var guard = 0
@@ -152,29 +157,76 @@ class WeChatAdapter : ChatAppAdapter {
             guard++
             val node = stack.removeLast()
             val id = node.viewIdResourceName
-            val text = node.text?.toString()
+            val text = node.text?.toString()?.takeIf { it.isNotBlank() }
             if (id == BUBBLE_ID) {
                 isChat = true
-                if (!text.isNullOrBlank()) {
+                if (text != null) {
                     val b = Rect(); node.getBoundsInScreen(b)
                     bubbles.add(Triple(b.top, b.centerX(), text))
                     if (b.top < firstBubbleTop) firstBubbleTop = b.top
                 }
+            } else if (text != null) {
+                val b = Rect(); node.getBoundsInScreen(b)
+                if (b.top > height * 0.85 && text in WECHAT_TAB_LABELS) sawTabBar = true
+                val w = b.width()
+                val inBand = b.top > height * 0.12 && b.bottom < height * 0.86
+                val bubbleSized = w in (width * 0.08).toInt()..(width * 0.78).toInt() &&
+                    b.height() in 24..(height / 3)
+                if (inBand && bubbleSized && text.length <= 200 && !looksLikeTimestamp(text) &&
+                    text !in WECHAT_CHROME
+                ) {
+                    loose.add(Triple(b.top, b.centerX(), text))
+                }
             }
+            if (!hasComposer && isWeChatComposer(node, height)) hasComposer = true
             for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
         }
         val title = findWeChatTitle(root, firstBubbleTop, width, res)
-        // In a chat but nothing readable → empty snapshot, the OCR fallback cue.
-        if (bubbles.isEmpty()) return if (isChat) ChatSnapshot(title, emptyList()) else null
-        bubbles.sortBy { it.first }
-        val msgs = bubbles.map { (_, cx, text) ->
-            Msg(if (cx > width / 2) "me" else "other", text)
+        if (bubbles.isNotEmpty()) {
+            bubbles.sortBy { it.first }
+            return ChatSnapshot(title, bubbles.map { (_, cx, text) ->
+                Msg(if (cx > width / 2) "me" else "other", text)
+            })
         }
-        return ChatSnapshot(title, msgs)
+        // Known bubble id, but WeChat stripped the text: OCR fallback.
+        if (isChat) return ChatSnapshot(title, emptyList())
+        // Newer WeChat builds rename id/bkl. A real thread still has the composer
+        // and a conversation title; the chat list has the bottom tab bar instead.
+        val looseTitle = title ?: findWeChatTitle(root, Int.MAX_VALUE, width, res)
+        if (!sawTabBar && hasComposer && isConversationTitle(looseTitle)) {
+            if (loose.isNotEmpty()) {
+                loose.sortBy { it.first }
+                return ChatSnapshot(looseTitle, loose.map { (_, cx, text) ->
+                    Msg(if (cx > width / 2) "me" else "other", text)
+                })
+            }
+            return ChatSnapshot(looseTitle, emptyList())
+        }
+        return null
+    }
+
+    private fun isConversationTitle(title: String?): Boolean {
+        if (title.isNullOrBlank()) return false
+        return title !in WECHAT_TAB_LABELS && title != "WeChat"
+    }
+
+    /** Bottom composer: the text field, or the voice/emoji/plus controls that replace it. */
+    private fun isWeChatComposer(node: AccessibilityNodeInfo, height: Int): Boolean {
+        val b = Rect(); node.getBoundsInScreen(b)
+        if (b.top < height * 0.70) return false
+        val cls = node.className?.toString() ?: ""
+        if (node.isEditable || cls.contains("EditText")) return true
+        val label = (node.contentDescription?.toString() ?: node.text?.toString() ?: "").trim()
+        return label in WECHAT_COMPOSER_LABELS
     }
 
     companion object {
         private const val BUBBLE_ID = "com.tencent.mm:id/bkl"
+        private val WECHAT_TAB_LABELS = setOf("微信", "通讯录", "发现", "我")
+        private val WECHAT_CHROME = setOf("微信", "通讯录", "发现", "我", "搜索", "搜一搜")
+        private val WECHAT_COMPOSER_LABELS = setOf(
+            "按住 说话", "按住说话", "切换到键盘", "表情", "更多功能", "更多功能按钮"
+        )
     }
 }
 
