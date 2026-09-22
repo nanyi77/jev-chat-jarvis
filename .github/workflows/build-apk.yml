@@ -11,7 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      ANDROID_HOME: /opt/android-sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,18 +23,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android SDK
+      - name: Install Android SDK packages
         run: |
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
-          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
-          rm -rf "$ANDROID_HOME/cmdline-tools/latest"
-          mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" ]; then
+            SM="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          else
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+            unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+            rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+            mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+            SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
           set +e
-          yes | "$SM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null
+          yes | "$SM" --licenses >/dev/null
           set -e
-          "$SM" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0"
+          "$SM" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
         run: bash ./gradlew assembleDebug --no-daemon --stacktrace
