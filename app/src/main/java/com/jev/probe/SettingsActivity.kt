@@ -71,23 +71,23 @@ class SettingsActivity : AppCompatActivity() {
 
         // --- 判断接口（Jev） ---
         val judgeCard = card()
-        judgeCard.addView(cardTitle("判断接口（Jev）"))
+        judgeCard.addView(cardTitle("判断接口"))
         judgeCard.addView(text("读对方消息、给意图判断和候选排序。必须配置。", 12f, sub))
 
-        val judgeBaseEdit = edit(prefs.judgeBaseUrl, Prefs.DEFAULT_JUDGE_BASE_OPENROUTER)
-        val judgeModelEdit = edit(prefs.judgeModel, Prefs.DEFAULT_JUDGE_MODEL_OPENROUTER)
+        val judgeBaseEdit = edit(prefs.judgeBaseUrl, Prefs.DEEPSEEK_BASE)
+        val judgeModelEdit = edit(prefs.judgeModel, Prefs.DEEPSEEK_MODEL)
         judgeProviderIdx = when (prefs.judgeProvider) {
             Prefs.PROVIDER_TYPESAFE -> 1
             Prefs.PROVIDER_CUSTOM -> 2
             else -> 0
         }
         judgeCard.addView(pills(
-            listOf("OpenRouter", "TypeSafe 直连", "自定义"), judgeProviderIdx) { idx ->
+            listOf("DeepSeek 官方", "TypeSafe 直连", "自定义"), judgeProviderIdx) { idx ->
             judgeProviderIdx = idx
             when (idx) {
                 0 -> {
-                    judgeBaseEdit.setText(Prefs.DEFAULT_JUDGE_BASE_OPENROUTER)
-                    judgeModelEdit.setText(Prefs.DEFAULT_JUDGE_MODEL_OPENROUTER)
+                    judgeBaseEdit.setText(Prefs.DEEPSEEK_BASE)
+                    judgeModelEdit.setText(Prefs.DEEPSEEK_MODEL)
                 }
                 1 -> {
                     judgeBaseEdit.setText(Prefs.DEFAULT_JUDGE_BASE_TYPESAFE)
@@ -101,7 +101,7 @@ class SettingsActivity : AppCompatActivity() {
         })
         judgeCard.addView(label("Base URL"))
         judgeCard.addView(judgeBaseEdit)
-        judgeCard.addView(text("OpenRouter 拼 /alpha/decisions；TypeSafe 拼 /v1/systemone；自定义按原样 POST。",
+        judgeCard.addView(text("DeepSeek 官方请求 /chat/completions，模型 deepseek-flash。TypeSafe 拼 /v1/systemone。自定义按原样 POST。",
             11f, sub))
         judgeCard.addView(label("密钥"))
         judgeCard.addView(edit(prefs.judgeKey, "sk-...", password = true).also { judgeKeyEdit = it })
@@ -115,7 +115,7 @@ class SettingsActivity : AppCompatActivity() {
             if (key.isBlank()) { judgeResult.text = "请先填密钥"; return@cardBtn }
             judgeResult.text = "测试中…"
             // Provider follows the address when it is still a known preset host,
-            // so a stale pill selection cannot send a TypeSafe path to OpenRouter.
+            // so a stale pill selection cannot send a TypeSafe path to DeepSeek.
             val provider = resolveJudgeProvider(judgeProviderIdx, base)
             if (provider == Prefs.PROVIDER_CUSTOM && base.isBlank()) {
                 judgeResult.text = "自定义档要填完整 URL（带路径）"; return@cardBtn
@@ -150,22 +150,21 @@ class SettingsActivity : AppCompatActivity() {
         // --- 回复接口 ---
         val replyCard = card()
         replyCard.addView(cardTitle("回复接口"))
-        replyCard.addView(text("生成 3 条候选回复。任何 OpenAI 兼容地址，填到 /v1 为止。", 12f, sub))
+        replyCard.addView(text("生成 3 条候选回复。DeepSeek 官方填 https://api.deepseek.com，程序会请求 /chat/completions。", 12f, sub))
 
         val replyBaseEdit = edit(prefs.replyBaseUrl, Prefs.DEFAULT_REPLY_BASE)
         val replyModelEdit = edit(prefs.replyModel, Prefs.DEFAULT_REPLY_MODEL)
-        val replyIdx = when (prefs.replyBaseUrl.trim().trimEnd('/')) {
-            Prefs.DEFAULT_REPLY_BASE -> 0
-            Prefs.DEEPSEEK_BASE -> 1
-            Prefs.DASHSCOPE_BASE -> 2
-            else -> 3
+        val replyNorm = prefs.replyBaseUrl.trim().trimEnd('/')
+        val replyIdx = when {
+            replyNorm == Prefs.DEEPSEEK_BASE || replyNorm == "${Prefs.DEEPSEEK_BASE}/v1" -> 0
+            replyNorm == Prefs.DASHSCOPE_BASE -> 1
+            else -> 2
         }
         replyCard.addView(pills(
-            listOf("OpenRouter", "DeepSeek 官方", "通义兼容", "自定义"), replyIdx) { idx ->
+            listOf("DeepSeek 官方", "通义兼容", "自定义"), replyIdx) { idx ->
             when (idx) {
-                0 -> { replyBaseEdit.setText(Prefs.DEFAULT_REPLY_BASE); replyModelEdit.setText(Prefs.DEFAULT_REPLY_MODEL) }
-                1 -> { replyBaseEdit.setText(Prefs.DEEPSEEK_BASE); replyModelEdit.setText(Prefs.DEEPSEEK_MODEL) }
-                2 -> { replyBaseEdit.setText(Prefs.DASHSCOPE_BASE); replyModelEdit.setText(Prefs.DASHSCOPE_MODEL) }
+                0 -> { replyBaseEdit.setText(Prefs.DEEPSEEK_BASE); replyModelEdit.setText(Prefs.DEEPSEEK_MODEL) }
+                1 -> { replyBaseEdit.setText(Prefs.DASHSCOPE_BASE); replyModelEdit.setText(Prefs.DASHSCOPE_MODEL) }
             }
         })
         replyCard.addView(label("Base URL"))
@@ -205,19 +204,20 @@ class SettingsActivity : AppCompatActivity() {
         // --- 视觉接口 ---
         val visionCard = card()
         visionCard.addView(cardTitle("视觉接口（OCR 用，可先不填）"))
-        visionCard.addView(text("读不到控件树的 App 走截图识别。B 阶段才用到，现在填不填都不影响。", 12f, sub))
+        visionCard.addView(text("控件树没有正文时才会用到。DeepSeek 官方用 deepseek-flash 识图；默认 OCR 仍是本机 ML Kit。", 12f, sub))
 
         val visionBaseEdit = edit(prefs.visionBaseUrl, Prefs.DEFAULT_VISION_BASE)
         val visionModelEdit = edit(prefs.visionModel, Prefs.DEFAULT_VISION_MODEL)
-        val visionIdx = when (prefs.visionBaseUrl.trim().trimEnd('/')) {
-            Prefs.DEFAULT_VISION_BASE -> 0
-            Prefs.DASHSCOPE_BASE -> 1
+        val visionNorm = prefs.visionBaseUrl.trim().trimEnd('/')
+        val visionIdx = when {
+            visionNorm == Prefs.DEEPSEEK_BASE || visionNorm == "${Prefs.DEEPSEEK_BASE}/v1" -> 0
+            visionNorm == Prefs.DASHSCOPE_BASE -> 1
             else -> 2
         }
         visionCard.addView(pills(
-            listOf("OpenRouter", "通义兼容", "自定义"), visionIdx) { idx ->
+            listOf("DeepSeek 官方", "通义兼容", "自定义"), visionIdx) { idx ->
             when (idx) {
-                0 -> { visionBaseEdit.setText(Prefs.DEFAULT_VISION_BASE); visionModelEdit.setText(Prefs.DEFAULT_VISION_MODEL) }
+                0 -> { visionBaseEdit.setText(Prefs.DEEPSEEK_BASE); visionModelEdit.setText(Prefs.DEEPSEEK_MODEL) }
                 1 -> { visionBaseEdit.setText(Prefs.DASHSCOPE_BASE); visionModelEdit.setText(Prefs.DASHSCOPE_VISION_MODEL) }
             }
         })
@@ -230,7 +230,12 @@ class SettingsActivity : AppCompatActivity() {
         val visionResult = resultText()
         visionCard.addView(cardBtn("测试视觉") {
             val visionBase = visionBaseEdit.text.toString().trim()
-            if (!VisionClient.supportsVision(visionBase.ifBlank { Prefs.DEFAULT_VISION_BASE })) {
+            val visionModelTyped = visionModelEdit.text.toString().trim()
+            if (!VisionClient.supportsVision(
+                    visionBase.ifBlank { Prefs.DEFAULT_VISION_BASE },
+                    visionModelTyped.ifBlank { Prefs.DEFAULT_VISION_MODEL }
+                )
+            ) {
                 visionResult.text = GUARD_NO_VISION
                 return@cardBtn
             }
@@ -350,9 +355,9 @@ class SettingsActivity : AppCompatActivity() {
             val judgeProv = resolveJudgeProvider(judgeProviderIdx, judgeBaseTyped)
             val judgeModelTyped = judgeModelEdit.text.toString().trim()
             prefs.judgeProvider = judgeProv
-            // Blank falls back to THIS provider's preset — never OpenRouter's by
-            // default. Custom is left exactly as typed (blank included): guessing
-            // a URL for it would silently point somewhere the user did not choose.
+            // Blank falls back to THIS provider's preset. Custom is left exactly
+            // as typed (blank included): guessing a URL for it would silently
+            // point somewhere the user did not choose.
             prefs.judgeBaseUrl = when {
                 judgeBaseTyped.isNotBlank() -> judgeBaseTyped
                 judgeProv == Prefs.PROVIDER_CUSTOM -> ""
@@ -397,36 +402,47 @@ class SettingsActivity : AppCompatActivity() {
     private fun providerOf(idx: Int) = when (idx) {
         1 -> Prefs.PROVIDER_TYPESAFE
         2 -> Prefs.PROVIDER_CUSTOM
-        else -> Prefs.PROVIDER_OPENROUTER
+        else -> Prefs.PROVIDER_DEEPSEEK
     }
 
     /**
      * The provider actually implied by what is in the address box. A preset host
-     * carries its own path (`/alpha/decisions`, `/v1/systemone`), so leaving that
-     * host in the box while the pill says something else would POST the wrong
-     * path — or, for custom, the bare API root.
+     * carries its own path, so leaving that host in the box while the pill says
+     * something else would POST the wrong path.
      */
-    private fun resolveJudgeProvider(idx: Int, base: String): String =
-        when (base.trim().trimEnd('/')) {
-            Prefs.DEFAULT_JUDGE_BASE_OPENROUTER -> Prefs.PROVIDER_OPENROUTER
-            Prefs.DEFAULT_JUDGE_BASE_TYPESAFE -> Prefs.PROVIDER_TYPESAFE
+    private fun resolveJudgeProvider(idx: Int, base: String): String {
+        val b = base.trim().trimEnd('/')
+        return when {
+            b.equals(Prefs.DEFAULT_JUDGE_BASE_TYPESAFE, true) ||
+                b.contains("api.typesafe.ai", true) -> Prefs.PROVIDER_TYPESAFE
+            b.contains("openrouter.ai", true) -> Prefs.PROVIDER_OPENROUTER
+            b.contains("api.deepseek.com", true) -> Prefs.PROVIDER_DEEPSEEK
             else -> providerOf(idx)
         }
-
-    /** The full endpoint a preset host would have been expanded to. */
-    private fun expandJudgeUrl(base: String): String = when (base.trim().trimEnd('/')) {
-        Prefs.DEFAULT_JUDGE_BASE_OPENROUTER -> Prefs.DEFAULT_JUDGE_BASE_OPENROUTER + "/alpha/decisions"
-        Prefs.DEFAULT_JUDGE_BASE_TYPESAFE -> Prefs.DEFAULT_JUDGE_BASE_TYPESAFE + "/v1/systemone"
-        else -> base.trim()
     }
 
-    private fun defaultJudgeBase(provider: String): String =
-        if (provider == Prefs.PROVIDER_TYPESAFE) Prefs.DEFAULT_JUDGE_BASE_TYPESAFE
-        else Prefs.DEFAULT_JUDGE_BASE_OPENROUTER
+    /** The full endpoint a preset host would have been expanded to. */
+    private fun expandJudgeUrl(base: String): String {
+        val b = base.trim().trimEnd('/')
+        return when {
+            b.equals(Prefs.DEFAULT_JUDGE_BASE_OPENROUTER, true) -> "$b/alpha/decisions"
+            b.equals(Prefs.DEFAULT_JUDGE_BASE_TYPESAFE, true) -> "$b/v1/systemone"
+            b.contains("api.deepseek.com", true) -> Prefs.chatCompletionsUrl(b)
+            else -> base.trim()
+        }
+    }
 
-    private fun defaultJudgeModel(provider: String): String =
-        if (provider == Prefs.PROVIDER_TYPESAFE) Prefs.DEFAULT_JUDGE_MODEL_TYPESAFE
-        else Prefs.DEFAULT_JUDGE_MODEL_OPENROUTER
+    private fun defaultJudgeBase(provider: String): String = when (provider) {
+        Prefs.PROVIDER_TYPESAFE -> Prefs.DEFAULT_JUDGE_BASE_TYPESAFE
+        Prefs.PROVIDER_OPENROUTER -> Prefs.DEFAULT_JUDGE_BASE_OPENROUTER
+        else -> Prefs.DEEPSEEK_BASE
+    }
+
+    private fun defaultJudgeModel(provider: String): String = when (provider) {
+        Prefs.PROVIDER_TYPESAFE -> Prefs.DEFAULT_JUDGE_MODEL_TYPESAFE
+        Prefs.PROVIDER_OPENROUTER -> Prefs.DEFAULT_JUDGE_MODEL_OPENROUTER
+        else -> Prefs.DEEPSEEK_MODEL
+    }
 
     /**
      * A throwaway [Prefs] view carrying exactly what is in the boxes right now,
@@ -572,9 +588,9 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "JEVASSIST"
 
-        /** DeepSeek's official API has no vision model; say so instead of a 400. */
+        /** deepseek-v4-pro has no vision; say so instead of a 400. */
         private const val GUARD_NO_VISION =
-            "该接口不支持视觉（DeepSeek 官方没有 image_url），请换 OpenRouter 或通义兼容"
+            "这个模型不支持识图。DeepSeek 官方请改用 deepseek-flash，或换通义兼容。"
 
         /** One scratch prefs file per test button; never the real config. */
         private const val SCRATCH_JUDGE = "jev_probe_scratch_judge"

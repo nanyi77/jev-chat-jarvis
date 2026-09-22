@@ -54,6 +54,12 @@ object HttpJson {
         route: String,
         extraHeaders: Map<String, String> = emptyMap()
     ): JSONObject {
+        // Thinking mode is on by default and ignores temperature. This app wants
+        // the final answer quickly, so official DeepSeek calls turn it off.
+        // Other hosts never see the field.
+        if (url.contains("api.deepseek.com", ignoreCase = true) && !body.has("thinking")) {
+            body.put("thinking", JSONObject().put("type", "disabled"))
+        }
         var attempt = 0
         var last: ApiException? = null
         while (attempt < MAX_ATTEMPTS) {

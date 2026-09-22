@@ -13,15 +13,15 @@ import org.json.JSONObject
  * the screenshot pipeline (see docs/v1.3-plan.md "OCR 分层").
  *
  * Reads visionBaseUrl / visionKey / visionModel from [Prefs]. The base URL does
- * not inherit from the reply route (a DeepSeek-style host has no vision
- * endpoint); the key still falls back reply -> judge.
+ * not inherit from a custom reply host; the key still falls back reply -> judge.
+ * DeepSeek official `deepseek-flash` accepts images. `deepseek-v4-pro` does not.
  *
  * Wire format notes that cost real debugging time:
  * - JPEG, not PNG: a screenshot as PNG base64 is several times larger.
  * - `Base64.NO_WRAP`: Android's default inserts newlines, which corrupts the
  *   data URL.
- * - The image part goes BEFORE the text part — DashScope's compatible-mode
- *   rejects the other order.
+ * - DashScope's compatible-mode wants the image part before the text part.
+ *   DeepSeek's documented order is text, then image.
  */
 class VisionClient(private val prefs: Prefs) {
 
@@ -40,18 +40,24 @@ class VisionClient(private val prefs: Prefs) {
     /** Generic single-question call against the image (used by the settings test). */
     fun ask(imageBase64Jpeg: String, prompt: String): String {
         val url = prefs.visionEndpoint()
-        // Image first, then text: DashScope compatible-mode requires this order.
+        val image = JSONObject()
+            .put("type", "image_url")
+            .put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$imageBase64Jpeg"))
+        val text = JSONObject().put("type", "text").put("text", prompt)
+        // DashScope rejects text-then-image. DeepSeek's docs use text, then image.
         val content = JSONArray()
-            .put(JSONObject()
-                .put("type", "image_url")
-                .put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$imageBase64Jpeg")))
-            .put(JSONObject().put("type", "text").put("text", prompt))
+        if (url.contains("dashscope", ignoreCase = true)) {
+            content.put(image).put(text)
+        } else {
+            content.put(text).put(image)
+        }
         val messages = JSONArray().put(
             JSONObject().put("role", "user").put("content", content))
         val body = JSONObject()
-            .put("model", prefs.visionModel)
+            .put("model", prefs.modelFor(url, prefs.visionModel))
             .put("messages", messages)
             .put("temperature", 0.0)
+            .put("max_tokens", 1500)
         val resp = HttpJson.post(url, prefs.effectiveVisionKey(), body, Route.VISION, HttpJson.headersFor(url))
         return resp.optJSONArray("choices")?.optJSONObject(0)
             ?.optJSONObject("message")?.optString("content") ?: ""
@@ -65,8 +71,15 @@ class VisionClient(private val prefs: Prefs) {
             return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
         }
 
-        /** DeepSeek's official API has no vision model; `image_url` is rejected. */
-        fun supportsVision(baseUrl: String): Boolean =
-            !baseUrl.contains("api.deepseek.com", ignoreCase = true)
+        /**
+         * Official DeepSeek vision is `deepseek-flash` (and the retired flash
+         * aliases). `deepseek-v4-pro` rejects image parts.
+         */
+        fun supportsVision(baseUrl: String, model: String = ""): Boolean {
+            if (!baseUrl.contains("api.deepseek.com", ignoreCase = true)) return true
+            val m = model.trim().lowercase()
+            if (m.isEmpty() || m.contains("flash")) return true
+            return false
+        }
     }
 }

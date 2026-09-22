@@ -18,11 +18,11 @@
 - **一套内核，多平台。** 微信 8.0.78、QQ 9.3.50、X 12.25 真机验证，读消息 → 判断 → 候选 → 填入整条链全通。新增一个 App 只需实现一个 `ChatAppAdapter`，其余全部复用。
 - **非侵入。** 不 hook、不改包、不走任何 App 的接口或账号、不读数据库，只用系统无障碍服务读「屏幕上正在显示的对话」。微信这种混淆节点的也能读到。
 - **看得懂，不止会写。** 用 [TypeSafe Jev](https://typesafe.ai/) 判断模型一次给出：对方真实意图、危险等级（1–9）、对方要什么、该不该马上回、最佳动作。约 1 秒，带把握度。
-- **3 条候选，Jev 排序。** 生成模型（默认 DeepSeek）起草 3 条口语化回复，Jev 按「最合适」排序并给出占比。
+- **3 条候选。** `deepseek-flash` 起草 3 条口语化回复，再按「最合适」排序并给出占比。
 - **发送永远由你点。** 程序只把回复填进输入框，从不自动发送，不碰转账 / 红包 / 收款。
 - **知识库 + 关联上下文。** 本地维护笔记和联系人档案（关系、别名、备注），分析时自动带上命中的知识和这个人的历史聊天，候选回复与知识库一致；联系人可跨 App 关联（同一个人在微信和 QQ 用别名对上）。历史记录默认关闭，开了也只存本机。
 - **读不到就 OCR。** 树里没有正文时自动截屏、用 ML Kit 中文离线识别（不上传图片、不需要 Google 服务），飞书正文靠它；任何 App 都可以在悬浮窗菜单里手动「截屏识别一次」。
-- **接口全可配。** 判断 / 回复 / 视觉三路接口的地址、密钥、模型分别可填，内置 OpenRouter、TypeSafe 直连、DeepSeek 官方、通义兼容预设，各自一键连通测试；只有一把密钥也能用（回复、视觉留空自动继承）。
+- **接口全可配。** 判断 / 回复 / 视觉三路默认走 [DeepSeek 官方 API](https://api-docs.deepseek.com/zh-cn/)，模型 `deepseek-flash`。也可以改成 TypeSafe 直连或通义兼容，各自一键连通测试；只填判断接口一把密钥时，回复和视觉会继承它。
 - **隐私在本机。** 密钥只存 App 私有空间，聊天内容只在分析那一刻发给模型接口，不落盘、不进日志。
 
 ## 平台支持
@@ -40,13 +40,13 @@
 
 ## 快速开始
 
-**1. 装包。** 仓库里有签好名的 release 包：[`apk/jev-assistant-v1.3-release.apk`](apk/jev-assistant-v1.3-release.apk)（Android 11+）。
+**1. 装包。** 仓库里有签好名的 release 包：[`apk/jev-assistant-v1.3-release.apk`](apk/jev-assistant-v1.3-release.apk)（Android 11+）。这份 APK 仍是改接口之前打的包，要使用 DeepSeek 官方 API 需要用当前源码重新编译安装。
 
 ```bash
 adb install -r apk/jev-assistant-v1.3-release.apk
 ```
 
-**2. 填密钥。** 打开 App → 设置 →「接口」现在分三张卡：判断接口 / 回复接口 / 视觉接口。最简单只填「判断接口」一栏的 [OpenRouter](https://openrouter.ai/) API Key，其余两栏留空会自动继承这把密钥就能用。想换回复模型（默认 `deepseek/deepseek-chat-v3.1`，国内 Gemini / OpenAI 会被区域限制）就在「回复接口」选预设（OpenRouter / DeepSeek 官方 / 通义兼容）或自填地址，每张卡都有独立的一键连通测试。
+**2. 填密钥。** 打开 App → 设置 →「接口」。三张卡（判断 / 回复 / 视觉）默认都是 DeepSeek 官方：`https://api.deepseek.com`，模型 `deepseek-flash`。只填「判断接口」一把 [DeepSeek API Key](https://platform.deepseek.com/api_keys) 即可，回复和视觉留空会继承这把密钥。地址填主机根，程序自己请求 `/chat/completions`。每张卡都能一键测连通。
 
 **3. 开权限。** 按主页向导开三项：
 - 无障碍（读消息；升级到 1.3 后需要把无障碍关掉再打开一次，截屏能力才生效）
@@ -76,14 +76,14 @@ adb install -r apk/jev-assistant-v1.3-release.apk
    意图 / 危险 / 需求 / 动作 / 该不该回          │
               └───────────────────┬───────────────────┘
                                   ▼
-                        Jev 给 3 条候选排序
+                        DeepSeek 给 3 条候选排序
                                   ▼
                 半透明悬浮窗展示 → 复制 / 填入（不发送）
 ```
 
 - **采集**：一个 App 一个适配器，服务按前台包名分发。适配器只负责把当前窗口变成「标题 + 消息列表（谁说的、说了什么）」，下游全部通用；树里没有正文时走截屏 + 离线 OCR 兜底（限频、失败退避，不会每秒连拍）。
-- **判断**：[Jev](https://docs.typesafe.ai/) 只回答选择 / 打分 / 是非，一次请求发全部题目，约 1 秒返回；命中知识库时 state 里会带 `background`（关系 + 联系人备注 + 命中笔记）和 `history`（历史消息）。
-- **回复**：生成模型起草 3 条候选，Jev 排序；提示词要求回复必须与知识库一致，不编造知识库没有的事实。
+- **判断**：默认 `POST https://api.deepseek.com/chat/completions`，模型 `deepseek-flash`，关闭思考模式，把同一套判断题收成 JSON。TypeSafe 直连仍可在设置里选。命中知识库时会带上关系、联系人备注、命中笔记和历史消息。
+- **回复**：同一把 DeepSeek 密钥起草 3 条候选再排序。提示词要求回复必须与知识库一致，不编造知识库没有的事实。`deepseek-v4-pro` 不能识图，视觉接口请留 `deepseek-flash`。
 - **回填**：`ACTION_SET_TEXT`，失败则剪贴板 + `ACTION_PASTE`，不发送。
 
 ## 适配一个新的聊天 App

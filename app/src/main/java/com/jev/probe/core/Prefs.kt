@@ -22,11 +22,16 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
      */
     init { if (prefsName == PREFS_MAIN) migrateIfNeeded() }
 
+    private fun migrateIfNeeded() {
+        migrateV13()
+        migrateToDeepSeek()
+    }
+
     /**
      * v1.2 -> v1.3: the single `openrouter_key` becomes the judge route's key.
      * `reply_model` keeps its old storage key, so it carries over untouched.
      */
-    private fun migrateIfNeeded() {
+    private fun migrateV13() {
         if (sp.getBoolean(K_MIGRATED_V13, false)) return   // runs exactly once
         val legacy = sp.getString(K_LEGACY_KEY, "") ?: ""
         val current = sp.getString(K_JUDGE_KEY, "") ?: ""
@@ -40,16 +45,104 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         e.apply()
     }
 
+    /**
+     * OpenRouter defaults become the DeepSeek official API. TypeSafe and custom
+     * are left alone. An OpenRouter key (`sk-or-`) is cleared because DeepSeek
+     * would reject it; the length is the only thing logged.
+     */
+    private fun migrateToDeepSeek() {
+        if (sp.getBoolean(K_MIGRATED_V14, false)) return
+        val e = sp.edit().putBoolean(K_MIGRATED_V14, true)
+        val provider = sp.getString(K_JUDGE_PROVIDER, null)
+        val base = sp.getString(K_JUDGE_BASE, null)
+        val model = sp.getString(K_JUDGE_MODEL, null)
+        val openRouterJudge = provider == PROVIDER_OPENROUTER ||
+            base?.contains("openrouter.ai", ignoreCase = true) == true ||
+            model?.startsWith("typesafe/jev") == true
+        if (openRouterJudge && provider != PROVIDER_TYPESAFE && provider != PROVIDER_CUSTOM) {
+            e.putString(K_JUDGE_PROVIDER, PROVIDER_DEEPSEEK)
+            e.putString(K_JUDGE_BASE, DEEPSEEK_BASE)
+            e.putString(K_JUDGE_MODEL, DEEPSEEK_MODEL)
+            clearOpenRouterKey(e, K_JUDGE_KEY)
+        } else if (provider == PROVIDER_DEEPSEEK ||
+            base?.contains("api.deepseek.com", ignoreCase = true) == true
+        ) {
+            normalizeDeepSeekRoute(e, K_JUDGE_BASE, K_JUDGE_MODEL, base, model)
+            if (provider.isNullOrBlank() || provider == PROVIDER_OPENROUTER) {
+                e.putString(K_JUDGE_PROVIDER, PROVIDER_DEEPSEEK)
+            }
+        } else if (provider == null && base == null && model == null) {
+            // v1.3 copied an OpenRouter key in without storing a provider. DeepSeek
+            // would reject it; a real DeepSeek key does not start with sk-or-.
+            clearOpenRouterKey(e, K_JUDGE_KEY)
+        }
+        migrateChatRoute(e, K_REPLY_BASE, K_REPLY_KEY, K_REPLY_MODEL, "deepseek/deepseek-chat-v3.1")
+        migrateChatRoute(e, K_VISION_BASE, K_VISION_KEY, K_VISION_MODEL, "qwen/qwen2.5-vl-72b-instruct")
+        Log.i(TAG, "prefs migrated to DeepSeek official API")
+        e.apply()
+    }
+
+    private fun migrateChatRoute(
+        e: android.content.SharedPreferences.Editor,
+        baseKey: String,
+        keyKey: String,
+        modelKey: String,
+        openRouterModel: String
+    ) {
+        val base = sp.getString(baseKey, null)
+        val model = sp.getString(modelKey, null)
+        if (base?.contains("openrouter.ai", ignoreCase = true) == true) {
+            e.putString(baseKey, DEEPSEEK_BASE)
+            e.putString(modelKey, DEEPSEEK_MODEL)
+            clearOpenRouterKey(e, keyKey)
+            return
+        }
+        if (base.isNullOrBlank()) {
+            clearOpenRouterKey(e, keyKey)
+            if (model == openRouterModel || model?.contains("/") == true) {
+                e.putString(modelKey, DEEPSEEK_MODEL)
+            }
+            return
+        }
+        if (base?.contains("api.deepseek.com", ignoreCase = true) == true) {
+            normalizeDeepSeekRoute(e, baseKey, modelKey, base, model)
+        }
+    }
+
+    private fun normalizeDeepSeekRoute(
+        e: android.content.SharedPreferences.Editor,
+        baseKey: String,
+        modelKey: String,
+        base: String?,
+        model: String?
+    ) {
+        if (base?.trim()?.trimEnd('/') == "https://api.deepseek.com/v1") {
+            e.putString(baseKey, DEEPSEEK_BASE)
+        }
+        if (model.isNullOrBlank() || model.contains("/") || model in RETIRED_DEEPSEEK_MODELS) {
+            e.putString(modelKey, DEEPSEEK_MODEL)
+        }
+    }
+
+    /** Drop a stored OpenRouter key. DeepSeek keys do not use this prefix. */
+    private fun clearOpenRouterKey(e: android.content.SharedPreferences.Editor, key: String) {
+        val v = sp.getString(key, "") ?: ""
+        if (v.startsWith("sk-or-")) {
+            e.putString(key, "")
+            Log.i(TAG, "cleared OpenRouter key field=$key len=${v.length}")
+        }
+    }
+
     // ---------------------------------------------------------------- judge
 
-    /** "openrouter" | "typesafe" | "custom". */
+    /** "deepseek" | "typesafe" | "openrouter" | "custom". */
     var judgeProvider: String
-        get() = sp.getString(K_JUDGE_PROVIDER, PROVIDER_OPENROUTER) ?: PROVIDER_OPENROUTER
+        get() = sp.getString(K_JUDGE_PROVIDER, PROVIDER_DEEPSEEK) ?: PROVIDER_DEEPSEEK
         set(v) = sp.edit().putString(K_JUDGE_PROVIDER, v.trim()).apply()
 
     /** Host root; the path is appended per provider (see [judgeEndpoint]). */
     var judgeBaseUrl: String
-        get() = sp.getString(K_JUDGE_BASE, DEFAULT_JUDGE_BASE_OPENROUTER) ?: DEFAULT_JUDGE_BASE_OPENROUTER
+        get() = sp.getString(K_JUDGE_BASE, DEEPSEEK_BASE) ?: DEEPSEEK_BASE
         set(v) = sp.edit().putString(K_JUDGE_BASE, v.trim()).apply()
 
     var judgeKey: String
@@ -57,7 +150,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         set(v) = sp.edit().putString(K_JUDGE_KEY, v.trim()).apply()
 
     var judgeModel: String
-        get() = sp.getString(K_JUDGE_MODEL, DEFAULT_JUDGE_MODEL_OPENROUTER) ?: DEFAULT_JUDGE_MODEL_OPENROUTER
+        get() = sp.getString(K_JUDGE_MODEL, DEEPSEEK_MODEL) ?: DEEPSEEK_MODEL
         set(v) = sp.edit().putString(K_JUDGE_MODEL, v.trim()).apply()
 
     /** Back-compat alias so older call sites keep compiling. */
@@ -67,7 +160,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
 
     // ---------------------------------------------------------------- reply
 
-    /** OpenAI-compatible base, up to and including `/v1`. */
+    /** OpenAI-compatible host root, for example https://api.deepseek.com. */
     var replyBaseUrl: String
         get() = sp.getString(K_REPLY_BASE, DEFAULT_REPLY_BASE) ?: DEFAULT_REPLY_BASE
         set(v) = sp.edit().putString(K_REPLY_BASE, v.trim()).apply()
@@ -85,9 +178,9 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
     // --------------------------------------------------------------- vision
 
     /**
-     * Blank = the OpenRouter vision default. Deliberately does NOT follow
-     * [replyBaseUrl]: a reply host like DeepSeek has no vision endpoint, so
-     * inheriting it would silently break OCR.
+     * Blank falls back to the DeepSeek official host. Deliberately does NOT
+     * follow a custom [replyBaseUrl]: a reply-only host may have no vision model.
+     * deepseek-flash accepts images; deepseek-v4-pro does not.
      */
     var visionBaseUrl: String
         get() = sp.getString(K_VISION_BASE, DEFAULT_VISION_BASE) ?: DEFAULT_VISION_BASE
@@ -193,23 +286,51 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
     /** Vision route key, falling back to reply then judge. */
     fun effectiveVisionKey(): String = visionKey.ifBlank { effectiveReplyKey() }
 
-    /** Full POST URL for the Jev decisions call, per provider. */
+    /**
+     * DeepSeek official chat completions, rather than the Jev decisions API.
+     * TypeSafe and a stored OpenRouter provider keep the decisions body.
+     */
+    fun usesChatJudge(): Boolean = when (judgeProvider) {
+        PROVIDER_DEEPSEEK -> true
+        PROVIDER_TYPESAFE, PROVIDER_OPENROUTER -> false
+        else -> {
+            val b = judgeBaseUrl.trim().lowercase()
+            "api.deepseek.com" in b || b.trimEnd('/').endsWith("/chat/completions")
+        }
+    }
+
+    /** Full POST URL for the judgment call, per provider. */
     fun judgeEndpoint(): String {
         val base = judgeBaseUrl.trim().trimEnd('/')
         return when (judgeProvider) {
             PROVIDER_TYPESAFE -> "$base/v1/systemone"
-            PROVIDER_CUSTOM -> judgeBaseUrl.trim()   // user supplies the full URL
-            else -> "$base/alpha/decisions"
+            PROVIDER_OPENROUTER -> "$base/alpha/decisions"
+            PROVIDER_CUSTOM -> {
+                val raw = judgeBaseUrl.trim()
+                if (usesChatJudge()) chatCompletionsUrl(raw) else raw
+            }
+            else -> chatCompletionsUrl(base.ifBlank { DEEPSEEK_BASE })
         }
     }
 
     /** Full POST URL for the OpenAI-compatible chat completions call. */
-    fun replyEndpoint(): String = "${replyBaseUrl.trim().trimEnd('/')}/chat/completions"
+    fun replyEndpoint(): String = chatCompletionsUrl(replyBaseUrl.ifBlank { DEFAULT_REPLY_BASE })
 
-    /** Same shape as [replyEndpoint]; blank falls back to the OpenRouter default. */
-    fun visionEndpoint(): String {
-        val base = visionBaseUrl.trim().ifBlank { DEFAULT_VISION_BASE }
-        return "${base.trimEnd('/')}/chat/completions"
+    /** Same shape as [replyEndpoint]; blank falls back to the DeepSeek official host. */
+    fun visionEndpoint(): String =
+        chatCompletionsUrl(visionBaseUrl.trim().ifBlank { DEFAULT_VISION_BASE })
+
+    /**
+     * Model id to send. On the official host, retired aliases and OpenRouter-style
+     * `vendor/model` ids become [DEEPSEEK_MODEL]. `deepseek-v4-pro` is kept.
+     */
+    fun modelFor(url: String, configured: String): String {
+        if (!url.contains("api.deepseek.com", ignoreCase = true)) {
+            return configured.ifBlank { DEEPSEEK_MODEL }
+        }
+        val m = configured.trim()
+        if (m.isEmpty() || m.contains("/") || m in RETIRED_DEEPSEEK_MODELS) return DEEPSEEK_MODEL
+        return m
     }
 
     fun isAllowed(title: String?): Boolean {
@@ -230,6 +351,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
 
         private const val K_LEGACY_KEY = "openrouter_key"
         private const val K_MIGRATED_V13 = "prefs_migrated_v13"
+        private const val K_MIGRATED_V14 = "prefs_migrated_v14_deepseek"
         private const val K_JUDGE_PROVIDER = "judge_provider"
         private const val K_JUDGE_BASE = "judge_base_url"
         private const val K_JUDGE_KEY = "judge_key"
@@ -255,6 +377,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         private const val K_BUBBLE_X = "bubble_x"
         private const val K_AUTO = "auto_analyze"
 
+        const val PROVIDER_DEEPSEEK = "deepseek"
         const val PROVIDER_OPENROUTER = "openrouter"
         const val PROVIDER_TYPESAFE = "typesafe"
         const val PROVIDER_CUSTOM = "custom"
@@ -268,18 +391,31 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         const val DEFAULT_JUDGE_BASE_TYPESAFE = "https://api.typesafe.ai"
         const val DEFAULT_JUDGE_MODEL_TYPESAFE = "jev-latest"
 
-        // Reply route presets (OpenAI-compatible chat completions).
-        const val DEFAULT_REPLY_BASE = "https://openrouter.ai/api/v1"
-        const val DEFAULT_REPLY_MODEL = "deepseek/deepseek-chat-v3.1"
-        const val DEEPSEEK_BASE = "https://api.deepseek.com/v1"
-        const val DEEPSEEK_MODEL = "deepseek-chat"
+        // Reply / vision presets. Official base has no /v1; the client appends
+        // /chat/completions. https://api.deepseek.com/v1 still works if typed.
+        const val DEEPSEEK_BASE = "https://api.deepseek.com"
+        const val DEEPSEEK_MODEL = "deepseek-flash"
+        const val DEFAULT_REPLY_BASE = DEEPSEEK_BASE
+        const val DEFAULT_REPLY_MODEL = DEEPSEEK_MODEL
         const val DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         const val DASHSCOPE_MODEL = "qwen-plus"
 
-        // Vision route preset (OpenRouter region-available; user may change).
-        const val DEFAULT_VISION_BASE = "https://openrouter.ai/api/v1"
-        const val DEFAULT_VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct"
+        const val DEFAULT_VISION_BASE = DEEPSEEK_BASE
+        const val DEFAULT_VISION_MODEL = DEEPSEEK_MODEL
         const val DASHSCOPE_VISION_MODEL = "qwen-vl-max"
+
+        /** Names the official API no longer wants. deepseek-v4-pro is not in here. */
+        val RETIRED_DEEPSEEK_MODELS = setOf(
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp"
+        )
+
+        fun chatCompletionsUrl(base: String): String {
+            val b = base.trim().trimEnd('/')
+            return if (b.endsWith("/chat/completions")) b else "$b/chat/completions"
+        }
 
         const val DEFAULT_REL = "对方是我的伴侣；from=me 的是我发的，from=other 的是对方发的"
     }

@@ -142,7 +142,7 @@
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4.5c4.4 0 7.8 3.4 9 7.5-1.2 4.1-4.6 7.5-9 7.5S4.2 16.1 3 12c1.2-4.1 4.6-7.5 9-7.5z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="2.8" fill="currentColor"/></svg>
         </span>
         <h3>判断</h3>
-        <p>TypeSafe Jev 判断模型一次给出：对方真实意图、危险等级 1–9、对方要什么、该不该马上回、最佳动作。约 1 秒，带把握度。</p>
+        <p>DeepSeek 官方 deepseek-flash 一次给出：对方真实意图、危险等级、对方要什么、该不该马上回、最佳动作，并带把握度。</p>
       </article>
 
       <article class="card reveal">
@@ -150,7 +150,7 @@
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3.5" y="5" width="17" height="4.4" rx="2.2" fill="currentColor"/><rect x="3.5" y="11" width="13" height="4.4" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="3.5" y="17" width="9" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
         </span>
         <h3>候选</h3>
-        <p>生成模型（默认 DeepSeek）起草 3 条口语化回复，Jev 按「最合适」重新排序，并给出每条的占比，谁排第一有理由。</p>
+        <p>deepseek-flash 起草 3 条口语化回复，再按「最合适」重新排序，并给出每条的占比。</p>
       </article>
 
       <article class="card reveal">
@@ -286,7 +286,7 @@
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 7.5h14M5 12h14M5 16.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="9" cy="7.5" r="2.1" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="15" cy="12" r="2.1" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="16.5" r="2.1" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
         </span>
         <h3>接口全可配</h3>
-        <p>判断 / 回复 / 视觉三路接口的地址、密钥、模型分别可填。内置 OpenRouter、TypeSafe 直连、DeepSeek 官方、通义兼容预设，各自一键连通测试。只填一把 OpenRouter 密钥就能用。</p>
+        <p>判断 / 回复 / 视觉三路默认走 DeepSeek 官方 API（deepseek-flash）。也可以改成 TypeSafe 直连或通义兼容，各自一键连通测试。只填一把 DeepSeek 密钥就能用。</p>
       </article>
 
       <article class="card reveal">
@@ -348,7 +348,7 @@
       <article class="card step reveal">
         <span class="step-no">02</span>
         <h3>填密钥</h3>
-        <p>设置 → 接口 → 判断接口填 OpenRouter API Key，其余留空会自动继承。三路接口都能一键测连通。</p>
+        <p>设置 → 接口 → 判断接口填 DeepSeek API Key，其余留空会自动继承。三路接口都能一键测连通。</p>
         <a class="shot" data-jev-repo href="#" target="_blank" rel="noopener" title="设置页">
           <img src="assets/settings.webp" alt="Jev 聊天助手设置页：判断 / 回复 / 视觉三路接口的地址、密钥与模型分别可填" width="900" height="2002" loading="lazy" decoding="async">
         </a>
@@ -387,8 +387,8 @@
         <span class="flow-idx">2</span>
         <div class="flow-pair">
           <div class="flow-half">
-            <h4>Jev 判断</h4>
-            <p>意图 · 危险等级 1–9 · 该不该马上回</p>
+            <h4>判断</h4>
+            <p>意图 · 危险等级 · 该不该马上回</p>
           </div>
           <div class="flow-half">
             <h4>生成模型起草</h4>
@@ -399,7 +399,7 @@
       <span class="flow-arrow" aria-hidden="true"></span>
       <div class="flow-node">
         <span class="flow-idx">3</span>
-        <h4>Jev 排序</h4>
+        <h4>候选排序</h4>
         <p>按「最合适」重排，给出占比</p>
       </div>
       <span class="flow-arrow" aria-hidden="true"></span>
@@ -440,7 +440,7 @@
       </details>
       <details>
         <summary>要准备什么密钥？<span class="acc-ico" aria-hidden="true"></span></summary>
-        <div class="faq-body"><p>最少一把 OpenRouter API Key 就能跑起来：填在「判断接口」，回复和视觉接口留空会自动继承。也可以三路分开配，内置 OpenRouter、TypeSafe 直连、DeepSeek 官方、通义兼容预设，各自一键测连通。</p></div>
+        <div class="faq-body"><p>最少一把 DeepSeek API Key 就能跑起来：填在「判断接口」，回复和视觉接口留空会自动继承。默认地址是 https://api.deepseek.com ，模型 deepseek-flash。也可以改成 TypeSafe 直连或通义兼容，各自一键测连通。</p></div>
       </details>
       <details>
         <summary>我的聊天内容会被上传吗？<span class="acc-ico" aria-hidden="true"></span></summary>

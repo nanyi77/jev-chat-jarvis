@@ -8,7 +8,7 @@
 2. **绝不自动发送消息**，绝不点微信的发送按钮。填入输入框后停手。
 3. **不碰钱**：不触碰转账、红包、收款码相关任何界面元素。
 4. **路径全 ASCII**：Android 构建工具在 Windows 上不接受中文路径。项目只能在 `H:\ai_tool\jev-android`。
-5. **密钥不落盘、不进日志、不进 git**：OpenRouter key 从环境变量 `OPENROUTER_API_KEY` 读，或 App 加密设置项。任何文件里都不许出现 `sk-or-` 开头的字符串。
+5. **密钥不落盘、不进日志、不进 git**：App 用设置项里的 DeepSeek API Key（`platform.deepseek.com`）。`tools/jev/` 的校准脚本仍读环境变量 `OPENROUTER_API_KEY`，因为那套 decisions 协议不是 DeepSeek 官方接口。任何文件里都不许出现真实密钥，也不许出现 `sk-or-` 开头的字符串。
 6. 编码一律 UTF-8。Windows 中文环境下 PowerShell 用 pwsh 7+，Python 读写文件必须显式 `encoding='utf-8'`。
 7. 禁止 `git commit` / `git push`，由人拍板。
 
@@ -32,10 +32,8 @@
 - X / Twitter 12.25.2（2026-09-21 实测，小米 14 / 1200×2670 / 中文界面）：私信页是 **Compose UI，消息节点没有 resource-id**，`android.view.View`、全宽 `[0,y][1200,y+h]`、text 为空，**全部信息在 content-desc**，格式 `发件人：正文。8:11 上午。Read。`（全角冒号分隔、`。` 粘字段、末尾可能有时间和 `Read`）。附件行 `All-In：附加的帖子。。` 内部嵌套引用帖子的 TextView，只采 View 自身的 desc、不采子节点。
 - X **所有页面都是 `com.x.android.main.MainActivity`，不能按 activity 判窗**：对话页有 EditText（唯一那个，[204,2424][1152,2568]），私信列表页没有 → 靠「树里有没有可编辑节点」判断。列表页的行长得也像（全宽 View + desc），但格式是 `All-In, @all_in_2026, 正文…`，用含 `, @` 再排除一次。发送按钮输入后才出现，**绝不点**。
 - 采集层按 App 分发：`capture/ChatAppAdapter.kt` 一个 App 一个适配器，`ChatCaptureService` 按前台包名查表；下游通用。
-- Jev = TypeSafe 的判断模型，只回答选择题/打分/是非，不生成文字。走 OpenRouter：
-  `POST https://openrouter.ai/api/alpha/decisions`，model `typesafe/jev-1.13`，
-  body `{model, state, questions}`，答案在 `answers`。实测 7 题一次约 900 ms、约 1000 输入 token、0.00004 美元。
-- Jev 主训练语言是英文：**题目的 instructions 和 criteria 用英文写，state 里的聊天内容保留中文原文。**
+- 默认判断、回复、视觉都走 DeepSeek 官方 API：`POST https://api.deepseek.com/chat/completions`，模型 `deepseek-flash`（2026-09 文档：支持 JSON Output 和图像理解；`deepseek-v4-pro` 不支持识图）。请求体加 `thinking.type=disabled`，判断再加 `response_format.type=json_object`。题目仍是 `JevQuestions` 的英文 instructions / criteria，聊天原文保持中文。答案被收成原来的 `choice` / `score` / `noul` 形状。
+- TypeSafe 直连（`https://api.typesafe.ai/v1/systemone`）和显式填了 OpenRouter 的地址仍走旧 decisions 协议：body `{model, state, questions}`，答案在 `answers`。这不再是默认。
 - 知识库 / 上下文数据在 `filesDir/kb` 下的 JSON 文件（`notes.json` / `contacts.json` / `logs/<contactId>.json`）；`KbStore` 单锁 + 原子写（先写 `.tmp` 再 rename）。`ContextBuilder` 只做 alwaysOn 笔记全带 + 标签/标题包含匹配（不做语义检索、不打分），**不自动建档、历史默认关闭（`contextEnabled=false`）**。
 - Kotlin 字符串模板 `$x` 后面紧跟中文标点（如 `」`、`）`）会被解析成标识符的一部分，导致 `Unresolved reference` 编译错误；**一律写成 `${x}`**。D 阶段在 `KbStore.kt` / `KbSelfCheck.kt` 踩过。
 - OCR 层在 `capture/ocr`：`ScreenCapture` 限频 ≥1s + 失败退避（1s→2s→4s→8s→16s→30s 封顶），错误码 1/2/3/4/6 各给一句人话；`MlKitOcr` 用 bundled 中文模型。适配器契约：`extract` 返回 `null` = 不在聊天窗，返回空消息列表 = 在聊天窗但树里没正文——只有后者才触发 OCR 兜底。

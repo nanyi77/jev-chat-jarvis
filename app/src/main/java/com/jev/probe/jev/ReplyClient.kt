@@ -75,9 +75,10 @@ class ReplyClient(private val prefs: Prefs) {
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
         val body = JSONObject()
-            .put("model", prefs.replyModel)
+            .put("model", prefs.modelFor(url, prefs.replyModel))
             .put("messages", messages)
             .put("temperature", temperature)
+            .put("max_tokens", 800)
         val resp = HttpJson.post(url, prefs.effectiveReplyKey(), body, Route.REPLY, HttpJson.headersFor(url))
         return resp.optJSONArray("choices")?.optJSONObject(0)
             ?.optJSONObject("message")?.optString("content") ?: ""
